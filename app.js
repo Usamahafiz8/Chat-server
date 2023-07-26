@@ -1,77 +1,75 @@
-const express = require('express');
-const bcryptjs = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const cors = require('cors');
-const io = require('socket.io')(8080, {
+const express = require("express");
+const bcryptjs = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+const cors = require("cors");
+const io = require("socket.io")(8080, {
   cors: {
-    origin: 'http://localhost:3000',
+    origin: "http://localhost:3000",
   },
 });
 
 // Connect DB
-require('./db/connection');
+require("./db/connection");
 
 // Import Files
-const Users = require('./models/Users');
-const Conversations = require('./models/Conversations');
-const Messages = require('./models/Messages');
+const Users = require("./models/Users");
+const Conversations = require("./models/Conversations");
+const Conversation = require("./models/Conversations");
+const Message = require("./models/Messages");
 
 // app Use
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use(cors());
+  
+
+
+
 
 // Middleware to verify admin JWT token
 const verifyAdminToken = (req, res, next) => {
   const token = req.headers.authorization;
   if (!token) {
-    return res.status(401).json({ error: 'Unauthorized. Admin token is missing.' });
+    return res
+      .status(401)
+      .json({ error: "Unauthorized. Admin token is missing." });
   }
 
-  const JWT_SECRET_KEY = process.env.JWT_SECRET_KEY || 'THIS_IS_A_JWT_SECRET_KEY';
+  const JWT_SECRET_KEY =  process.env.JWT_SECRET_KEY || "YOUR_SECRET_KEY_FOR_ADMIN";
   jwt.verify(token, JWT_SECRET_KEY, (err, decodedToken) => {
     if (err) {
-      return res.status(401).json({ error: 'Unauthorized. Invalid admin token.' });
+      return res
+      .status(401)
+      .json({ error: "Unauthorized. Invalid admin token." });
     }
-
-    if (decodedToken.role !== 'admin') {
-      return res.status(403).json({ error: 'Forbidden. Only admin users are allowed.' });
+    
+    if (decodedToken.role !== "admin") {
+      return res
+      .status(403)
+      .json({ error: "Forbidden. Only admin users are allowed." });
     }
-
+    
     req.admin = decodedToken;
     next();
   });
 };
-// Middleware to verify user token
-// const verifyUserToken = (req, res, next) => {
-//   const token = req.headers.authorization;
-//   if (!token) {
-//     return res.status(401).json({ error: 'Unauthorized. User token is missing.' });
-//   }
-
-//   jwt.verify(token, 'JWT_SECRET_KEY', (err, decodedToken) => {
-//     if (err) {
-//       return res.status(401).json({ error: 'Unauthorized. Invalid user token.' });
-//     }
-
-//     req.user = decodedToken;
-//     next();
-//   });
-// };
-
 
 // Middleware to verify user token
-const JWT_SECRET_KEY = 'YOUR_SECRET_KEY'; 
 const verifyUserToken = (req, res, next) => {
   const token = req.headers.authorization;
   if (!token) {
-    return res.status(401).json({ error: 'Unauthorized. User token is missing.' });
+    return res
+    .status(401)
+    .json({ error: "Unauthorized. User token is missing." });
   }
-
+  
+  const JWT_SECRET_KEY =  process.env.JWT_SECRET_KEY || "YOUR_SECRET_KEY_FOR_USER";
   jwt.verify(token, JWT_SECRET_KEY, (err, decodedToken) => {
     if (err) {
-      return res.status(401).json({ error: 'Unauthorized. Invalid user token.' });
+      return res
+        .status(401)
+        .json({ error: "Unauthorized. Invalid user token." });
     }
 
     req.user = decodedToken;
@@ -79,27 +77,34 @@ const verifyUserToken = (req, res, next) => {
   });
 };
 
-
 // Socket.io
 let users = [];
-io.on('connection', (socket) => {
-  console.log('User connected', socket.id);
-  socket.on('addUser', (userId) => {
+io.on("connection", (socket) => {
+  console.log("User connected", socket.id);
+  socket.on("addUser", (userId) => {
     const isUserExist = users.find((user) => user.userId === userId);
     if (!isUserExist) {
       const user = { userId, socketId: socket.id };
       users.push(user);
-      io.emit('getUsers', users);
+      io.emit("getUsers", users);
     }
   });
-
-  socket.on('sendMessage', async ({ senderId, receiverId, message, conversationId }) => {
+  socket.on("sendMessage", async ({ senderId, receiverId, message, conversationId }) => {
     const receiver = users.find((user) => user.userId === receiverId);
     const sender = users.find((user) => user.userId === senderId);
     const user = await Users.findById(senderId);
-    console.log('sender :>> ', sender, receiver);
-    if (receiver) {
-      io.to(receiver.socketId).to(sender.socketId).emit('getMessage', {
+  
+    // Check if sender and receiver are defined
+    if (sender && receiver) {
+      io.to(receiver.socketId).to(sender.socketId).emit("getMessage", {
+        senderId,
+        message,
+        conversationId,
+        receiverId,
+        user: { id: user._id, fullName: user.fullName, email: user.email },
+      });
+    } else if (sender) {
+      io.to(sender.socketId).emit("getMessage", {
         senderId,
         message,
         conversationId,
@@ -107,39 +112,33 @@ io.on('connection', (socket) => {
         user: { id: user._id, fullName: user.fullName, email: user.email },
       });
     } else {
-      io.to(sender.socketId).emit('getMessage', {
-        senderId,
-        message,
-        conversationId,
-        receiverId,
-        user: { id: user._id, fullName: user.fullName, email: user.email },
-      });
+      console.error("Sender not found!");
     }
   });
-
-  socket.on('disconnect', () => {
+  
+  socket.on("disconnect", () => {
     users = users.filter((user) => user.socketId !== socket.id);
-    io.emit('getUsers', users);
+    io.emit("getUsers", users);
   });
 });
 
 // Admin login
-app.post('/api/admin/login', async (req, res) => {
+app.post("/api/admin/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
     if (!email || !password) {
-      return res.status(400).json({ error: 'Please fill all required fields' });
+      return res.status(400).json({ error: "Please fill all required fields" });
     }
 
-    const adminUser = await Users.findOne({ email, role: 'admin' });
+    const adminUser = await Users.findOne({ email, role: "admin" });
     if (!adminUser) {
-      return res.status(404).json({ error: 'Admin user not found' });
+      return res.status(404).json({ error: "Admin user not found" });
     }
 
     const validateAdmin = await bcryptjs.compare(password, adminUser.password);
     if (!validateAdmin) {
-      return res.status(400).json({ error: 'Invalid credentials' });
+      return res.status(400).json({ error: "Invalid credentials" });
     }
 
     const payload = {
@@ -147,257 +146,80 @@ app.post('/api/admin/login', async (req, res) => {
       email: adminUser.email,
       role: adminUser.role,
     };
-    const JWT_SECRET_KEY = process.env.JWT_SECRET_KEY || 'THIS_IS_A_JWT_SECRET_KEY';
+    const JWT_SECRET_KEY =
+      process.env.JWT_SECRET_KEY || "THIS_IS_A_JWT_SECRET_KEY";
 
-    jwt.sign(payload, JWT_SECRET_KEY, { expiresIn: '1d' }, (err, token) => {
-      return res.status(200).json({ token });
+    jwt.sign(payload, JWT_SECRET_KEY, { expiresIn: "1d" }, (err, token) => {
+      if (err) {
+        console.error("Error signing JWT token:", err);
+        return res.status(500).json({ error: "Internal Server Error" });
+      }
+
+      // Return both the token and the admin ID in the response
+      return res.status(200).json({ token, adminId: adminUser._id });
     });
   } catch (error) {
-    console.error('Error logging in admin:', error);
-    return res.status(500).json({ error: 'Internal Server Error' });
+    console.error("Error logging in admin:", error);
+    return res.status(500).json({ error: "Internal Server Error" });
   }
 });
 
 
-// // Create a new admin
-// app.post('/api/admins', verifyAdminToken, async (req, res) => {
-//   try {
-//     const { fullName, email, password } = req.body;
+// Create a new admin
+app.post('/api/admins', verifyAdminToken, async (req, res) => {
+  try {
+    const { fullName, email, password } = req.body;
 
-//     if (!fullName || !email || !password) {
-//       return res.status(400).json({ error: 'Please fill all required fields' });
-//     }
+    if (!fullName || !email || !password) {
+      return res.status(400).json({ error: 'Please fill all required fields' });
+    }
 
-//     const existingAdmin = await Users.findOne({ email, role: 'admin' });
-//     if (existingAdmin) {
-//       return res.status(400).json({ error: 'Admin user already exists' });
-//     }
+    const existingAdmin = await Users.findOne({ email, role: 'admin' });
+    if (existingAdmin) {
+      return res.status(400).json({ error: 'Admin user already exists' });
+    }
 
-//     const hashedPassword = await bcryptjs.hash(password, 10);
-//     const newAdmin = new Users({ fullName, email, password: hashedPassword, role: 'admin' });
-//     await newAdmin.save();
+    const hashedPassword = await bcryptjs.hash(password, 10);
+    const newAdmin = new Users({ fullName, email, password: hashedPassword, role: 'admin' });
+    await newAdmin.save();
 
-//     return res.status(200).json({ message: 'Admin user created successfully' });
-//   } catch (error) {
-//     console.error('Error creating admin user:', error);
-//     return res.status(500).json({ error: 'Internal Server Error' });
-//   }
-// });
+    return res.status(200).json({ message: 'Admin user created successfully' });
+  } catch (error) {
+    console.error('Error creating admin user:', error);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
 
 // Fetch all users info other than admin
-app.get('/api/admin/users', verifyAdminToken, async (req, res) => {
+app.get("/api/admin/users",
+//  verifyAdminToken,
+  async (req, res) => {
   try {
-    const allUsers = await Users.find({ role: { $ne: 'admin' } }, { password: 0 });
+    const allUsers = await Users.find(
+      { role: { $ne: "admin" } },
+      { password: 0 }
+    );
     // The above query will find all users whose role is not equal to 'admin'
     // and exclude the password field from the response.
 
     return res.status(200).json(allUsers);
   } catch (error) {
-    console.error('Error fetching all users:', error);
-    return res.status(500).json({ error: 'Internal Server Error' });
+    console.error("Error fetching all users:", error);
+    return res.status(500).json({ error: "Internal Server Error" });
   }
 });
 
 
-// Fetch all conversations for the admin
-// app.get('/api/admin/conversations', verifyAdminToken, async (req, res) => {
-//   try {
-//     const conversations = await Conversations.find({});
-//     return res.status(200).json(conversations);
-//   } catch (error) {
-//     console.error('Error fetching conversations:', error);
-//     return res.status(500).json({ error: 'Internal Server Error' });
-//   }
-// });
-
-// Fetch all messages for a conversation
-// app.get('/api/admin/messages/:conversationId', verifyAdminToken, async (req, res) => {
-//   try {
-//     const { conversationId } = req.params;
-//     const messages = await Messages.find({ conversationId });
-//     return res.status(200).json(messages);
-//   } catch (error) {
-//     console.error('Error fetching messages:', error);
-//     return res.status(500).json({ error: 'Internal Server Error' });
-//   }
-// });
-
-// Fetch all messages between admin and user
-// app.get('/api/admin/messages/user/:userId', verifyAdminToken, async (req, res) => {
-//   try {
-//     const { userId } = req.params;
-//     const conversation = await Conversations.findOne({ participants: { $all: [req.admin.userId, userId] } });
-
-//     if (!conversation) {
-//       return res.status(404).json({ error: 'Conversation not found' });
-//     }
-
-//     const messages = await Messages.find({ conversationId: conversation._id });
-//     return res.status(200).json(messages);
-//   } catch (error) {
-//     console.error('Error fetching messages:', error);
-//     return res.status(500).json({ error: 'Internal Server Error' });
-//   }
-// });
-
-// Send message from admin to user
-// app.post('/api/admin/send-message', verifyAdminToken, async (req, res) => {
-//   try {
-//     const { senderId, receiverId, message } = req.body;
-
-//     if (!message) {
-//       return res.status(400).json({ error: 'Please enter a message' });
-//     }
-
-//     const conversation = await Conversations.findOne({
-//       participants: { $all: [senderId, receiverId] },
-//     });
-
-//     let conversationId;
-//     if (conversation) {
-//       conversationId = conversation._id;
-//     } else {
-//       const newConversation = new Conversations({ participants: [senderId, receiverId] });
-//       const savedConversation = await newConversation.save();
-//       conversationId = savedConversation._id;
-//     }
-
-//     const newMessage = new Messages({ conversationId, sender: senderId, message });
-//     await newMessage.save();
-
-//     io.emit('getMessage', {
-//       senderId,
-//       message,
-//       conversationId,
-//       receiverId,
-//       user: { id: senderId, fullName: req.admin.fullName, email: req.admin.email }, // Assuming the admin's model has fullName and email properties
-//     });
-
-//     return res.status(200).json({ message: 'Message sent successfully' });
-//   } catch (error) {
-//     console.error('Error sending message:', error);
-//     return res.status(500).json({ error: 'Internal Server Error' });
-//   }
-// });
-// Send message from admin to user (protected route)
-// app.post('/api/admin/send-message-to-user', verifyAdminToken, async (req, res) => {
-//   try {
-//     const { userId, message } = req.body;
-//     const adminId = req.admin.id;
-
-//     if (!userId || !message) {
-//       return res.status(400).json({ error: 'Please provide user ID and message' });
-//     }
-
-//     // Check if the user exists
-//     const user = await Users.findOne({ _id: userId,  });
-//     if (!user) {
-//       return res.status(404).json({ error: 'User not found' });
-//     }
-
-//     // Find or create a conversation between the admin and the user
-//     const conversation = await Conversations.findOne({
-//       participants: { $all: [userId, adminId] },
-//     });
-
-//     let conversationId;
-//     if (conversation) {
-//       conversationId = conversation._id;
-//     } else {
-//       const newConversation = new Conversations({ participants: [userId, adminId] });
-//       const savedConversation = await newConversation.save();
-//       conversationId = savedConversation._id;
-//     }
-
-//     // Save the message
-//     const newMessage = new Messages({ conversationId, sender: adminId, message });
-//     await newMessage.save();
-
-//     // Emit the message to the user (using socket.io)
-//     const userSocket = users.find((user) => user.userId === userId);
-//     if (userSocket) {
-//       io.to(userSocket.socketId).emit('getMessage', {
-//         senderId: adminId,
-//         message,
-//         conversationId,
-//         receiverId: userId,
-//         user: { id: req.admin.id, fullName: req.admin.fullName, email: req.admin.email },
-//       });
-//     }
-
-//     return res.status(200).json({ message: 'Message sent to user successfully' });
-//   } catch (error) {
-//     console.error('Error sending message to user:', error);
-//     return res.status(500).json({ error: 'Internal Server Error' });
-//   }
-// });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 // User registration or login
-app.post('/api/user/register-or-login', async (req, res) => {
+app.post("/api/user/register-or-login", async (req, res) => {
   try {
     const { fullName, email } = req.body;
 
     if (!fullName || !email) {
-      return res.status(400).json({ error: 'Please provide full name and email' });
+      return res
+        .status(400)
+        .json({ error: "Please provide full name and email" });
     }
 
     let user = await Users.findOne({ email });
@@ -407,7 +229,7 @@ app.post('/api/user/register-or-login', async (req, res) => {
       user = new Users({
         fullName,
         email,
-        role: 'guest', // Assuming "guest" is the default role for users
+        role: "guest", // Assuming "guest" is the default role for users
       });
 
       await user.save();
@@ -420,254 +242,236 @@ app.post('/api/user/register-or-login', async (req, res) => {
       email: user.email,
       role: user.role,
     };
-    const token = jwt.sign(payload, 'JWT_SECRET_KEY', { expiresIn: '1d' });
+    const token = jwt.sign(payload, "JWT_SECRET_KEY", { expiresIn: "1d" });
 
     // Return user details and token for login
-    return res.status(200).json({ message: 'User registration or login successful', user, token });
+    return res
+      .status(200)
+      .json({ message: "User registration or login successful", user, token });
   } catch (error) {
-    console.error('Error registering or logging in user:', error);
-    return res.status(500).json({ error: 'Internal Server Error' });
+    console.error("Error registering or logging in user:", error);
+    return res.status(500).json({ error: "Internal Server Error" });
   }
 });
 
-// Select a random admin user and start a conversation
-app.post('/api/start-conversation-with-admin', verifyUserToken, async (req, res) => {
+
+// Add the route to fetch all admins for the user
+app.get("/api/user/admins",  async (req, res) => {
   try {
-    // Get the current user's ID from the decoded token (provided in the verifyUserToken middleware)
-    const userId = req.user.userId;
+    // Find all users with the role "admin" (excluding the password field)
+    const admins = await Users.find({ role: "admin" }, { password: 0 });
 
-    // Find all available admin users
-    const adminUsers = await Users.find({ role: 'admin' });
+    return res.status(200).json(admins);
+  } catch (error) {
+    console.error("Error fetching admins:", error);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
+});
 
-    // If there are no admin users, return an error
-    if (adminUsers.length === 0) {
-      return res.status(404).json({ error: 'No available admin users' });
-    }
+// API to start a conversation with an admin for the user
+app.post("/api/user/start-conversation", async (req, res) => {
+  try {
+    const { adminId, userId } = req.body;
 
-    // Select a random admin user
-    const randomAdminIndex = Math.floor(Math.random() * adminUsers.length);
-    const selectedAdmin = adminUsers[randomAdminIndex];
-
-    // Check if a conversation already exists between the user and the selected admin
-    const existingConversation = await Conversations.findOne({
-      participants: { $all: [userId, selectedAdmin._id] },
+    // Check if the conversation between the user and admin already exists
+    const existingConversation = await Conversation.findOne({
+      members: { $all: [adminId, userId] },
     });
 
-    // If a conversation already exists, return the existing conversation ID
     if (existingConversation) {
-      return res.status(200).json({
-        message: 'Conversation with admin already exists',
-        conversationId: existingConversation._id,
-        adminId: selectedAdmin._id,
+      // If the conversation already exists, return the existing conversation
+      return res.status(200).json({ conversation: existingConversation });
+    } else {
+      // If the conversation doesn't exist, create a new conversation
+      const newConversation = new Conversation({
+        members: [adminId, userId],
+      });
+
+      await newConversation.save();
+      return res.status(200).json({ conversation: newConversation });
+    }
+  } catch (error) {
+    console.error("Error starting conversation:", error);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// send massage for both users
+// app.post("/api/conversation/send-message/:conversationId", async (req, res) => {
+//   try {
+//     const userId = req.body.userId;
+//     const conversationId = req.params.conversationId;
+//     const { message } = req.body;
+
+//     // Check if the conversation exists
+//     const conversation = await Conversation.findById(conversationId);
+//     if (!conversation) {
+//       return res.status(404).json({ error: "Conversation not found" });
+//     }
+
+//     // Save the message to the database
+//     const newMessage = new Message({
+//       conversationId: conversation._id,
+//       senderId: userId,
+//       message,
+//       time: new Date().toLocaleTimeString(),
+//       date: new Date().toLocaleDateString(),
+//     });
+//     await newMessage.save();
+
+//     // Add the newly created message to the conversation's messages array
+//     conversation.messages.push(newMessage._id);
+//     await conversation.save();
+
+//     // Emit the message to the admin using Socket.IO
+//     const adminId = conversation.admin;
+//     const adminSocket = io.sockets.sockets.get(adminId);
+//     if (adminSocket) {
+//       adminSocket.emit("getMessage", {
+//         senderId: userId,
+//         message,
+//         conversationId: conversation._id,
+//         receiverId: adminId,
+//       });
+//     }
+
+//     return res.status(200).json({ message: "Message sent successfully" });
+//   } catch (error) {
+//     console.error("Error sending message:", error);
+//     return res.status(500).json({ error: "Internal Server Error" });
+//   }
+// });
+app.post("/api/conversation/send-message/:conversationId", async (req, res) => {
+  try {
+    const userId = req.body.userId;
+    const conversationId = req.params.conversationId;
+    const { message } = req.body;
+
+    // Check if the conversation exists
+    const conversation = await Conversation.findById(conversationId);
+    if (!conversation) {
+      return res.status(404).json({ error: "Conversation not found" });
+    }
+
+    // Get the sender's information (ID and fullName) from the Users collection
+    const sender = await Users.findById(userId);
+    if (!sender) {
+      return res.status(404).json({ error: "Sender not found" });
+    }
+
+    // Save the message to the database, including sender's ID and fullName
+    const newMessage = new Message({
+      conversationId: conversation._id,
+      senderId: userId,
+      senderName: sender.fullName,
+      message,
+      time: new Date().toLocaleTimeString(),
+      date: new Date().toLocaleDateString(),
+    });
+    await newMessage.save();
+
+    // Add the newly created message to the conversation's messages array
+    conversation.messages.push(newMessage._id);
+    await conversation.save();
+
+    // Emit the message to the admin using Socket.IO
+    const adminId = conversation.admin;
+    const adminSocket = io.sockets.sockets.get(adminId);
+    if (adminSocket) {
+      adminSocket.emit("getMessage", {
+        senderId: userId,
+        senderName: sender.fullName,
+        message,
+        conversationId: conversation._id,
+        receiverId: adminId,
       });
     }
 
-    // Create a new conversation between the user and the selected admin
-    const newConversation = new Conversations({
-      participants: [userId, selectedAdmin._id],
-    });
-    const savedConversation = await newConversation.save();
-
-    return res.status(200).json({
-      message: 'Conversation started with admin successfully',
-      conversationId: savedConversation._id,
-      adminId: selectedAdmin._id,
-    });
+    return res.status(200).json({ message: "Message sent successfully" });
   } catch (error) {
-    console.error('Error starting conversation with admin:', error);
-    return res.status(500).json({ error: 'Internal Server Error' });
+    console.error("Error sending message:", error);
+    return res.status(500).json({ error: "Internal Server Error" });
   }
 });
 
 
+// API to fetch messages for a conversation
+app.get("/api/conversation/messages/:conversationId", async (req, res) => {
+  try {
+    const conversationId = req.params.conversationId;
+
+    // Check if the conversation exists
+    const conversation = await Conversation.findById(conversationId);
+    if (!conversation) {
+      return res.status(404).json({ error: "Conversation not found" });
+    }
+
+    // Find all messages for the given conversationId
+    const messages = await Message.find({ conversationId });
+
+    // Emit the messages to the users involved in the conversation using Socket.IO
+    const senderId = conversation.members[0];
+    const receiverId = conversation.members[1];
+    const senderSocket = io.sockets.sockets.get(senderId);
+    const receiverSocket = io.sockets.sockets.get(receiverId);
+
+    if (senderSocket) {
+      senderSocket.emit("getMessages", { conversationId, messages });
+    }
+
+    if (receiverSocket) {
+      receiverSocket.emit("getMessages", { conversationId, messages });
+    }
+
+    return res.status(200).json({ messages });
+  } catch (error) {
+    console.error("Error fetching messages:", error);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
+});
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// // Start conversation with admin
-// app.post('/api/user/start-conversation',verifyUserToken, async (req, res) => {
+// // Fetch all users info other than admin
+// app.get("/api/admin/users", verifyAdminToken, async (req, res) => {
 //   try {
-//     const { userId } = req.body;
+//     const allUsers = await Users.find(
+//       { role: { $ne: "admin" } },
+//       { password: 0 }
+//     );
+//     // The above query will find all users whose role is not equal to 'admin'
+//     // and exclude the password field from the response.
 
-//     if (!userId) {
-//       return res.status(400).json({ error: 'Please provide user ID' });
-//     }
-
-//     const adminId = 'admin'; // Assuming the admin's user ID is "admin"
-//     const user = await Users.findById(userId);
-
-//     if (!user) {
-//       return res.status(404).json({ error: 'User not found' });
-//     }
-
-//     // Start a conversation with the admin
-//     const conversation = await Conversations.findOne({
-//       participants: { $all: [user._id, adminId] },
-//     });
-
-//     let conversationId;
-//     if (conversation) {
-//       conversationId = conversation._id;
-//     } else {
-//       const newConversation = new Conversations({ participants: [user._id, adminId] });
-//       const savedConversation = await newConversation.save();
-//       conversationId = savedConversation._id;
-//     }
-
-//     // Send a message to the admin
-//     const message = 'Hello Admin! I have started a conversation.';
-//     const newMessage = new Messages({ conversationId, sender: user._id, message });
-//     await newMessage.save();
-
-//     const adminSocket = users.find((user) => user.userId === adminId);
-//     if (adminSocket) {
-//       io.to(adminSocket.socketId).emit('getMessage', {
-//         senderId: user._id,
-//         message,
-//         conversationId,
-//         receiverId: adminId,
-//         user: { id: user._id, fullName: user.fullName, email: user.email },
-//       });
-//     }
-
-//     return res.status(200).json({ message: 'Conversation with admin started successfully' });
+//     return res.status(200).json(allUsers);
 //   } catch (error) {
-//     console.error('Error starting conversation:', error);
-//     return res.status(500).json({ error: 'Internal Server Error' });
+//     console.error("Error fetching all users:", error);
+//     return res.status(500).json({ error: "Internal Server Error" });
 //   }
 // });
 
-// // Fetch user details after login
-// app.get('/api/user/details',verifyUserToken, async (req, res) => {
-//   try {
-//     // Assuming the user ID is stored in the request object after login
-//     const userId = req.user.id; // Replace 'id' with the actual property name for user ID
 
-//     const user = await Users.findById(userId);
-//     if (!user) {
-//       return res.status(404).json({ error: 'User not found' });
-//     }
+// API to get conversations for an admin
+app.get("/api/admin/conversations/:adminId", async (req, res) => {
+  try {
+    const adminIdFromUrl = req.params.adminId;
 
-//     // Return user details
-//     return res.status(200).json({ user });
-//   } catch (error) {
-//     console.error('Error fetching user details:', error);
-//     return res.status(500).json({ error: 'Internal Server Error' });
-//   }
-// });
+    // Find all conversations where the admin is a member
+    const conversations = await Conversation.find({
+      members: { $in: [adminIdFromUrl] },
+    });
 
-// // Fetch the list of available admins
-// app.get('/api/user/available-admins',verifyUserToken, async (req, res) => {
-//   try {
-//     // Assuming 'admin' is the role assigned to admin users
-//     const availableAdmins = await Users.find({ role: 'admin' });
+    // Emit the conversations to the admin using Socket.IO
+    const adminSocket = io.sockets.sockets.get(adminIdFromUrl);
+    if (adminSocket) {
+      adminSocket.emit("getConversations", conversations);
+    }
 
-//     // Return the list of available admins
-//     return res.status(200).json({ availableAdmins });
-//   } catch (error) {
-//     console.error('Error fetching available admins:', error);
-//     return res.status(500).json({ error: 'Internal Server Error' });
-//   }
-// });
+    return res.status(200).json({ conversations });
+  } catch (error) {
+    console.error("Error fetching conversations for admin:", error);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
+});
 
-// // Fetch conversations between the user and an admin
-// app.get('/api/user/conversations/:adminId',verifyUserToken, async (req, res) => {
-//   try {
-//     const { adminId } = req.params;
-//     const userId = req.user.id; // Replace 'id' with the actual property name for user ID
-
-//     // Find the conversation between the user and the specified admin
-//     const conversation = await Conversations.findOne({
-//       participants: { $all: [userId, adminId] },
-//     });
-
-//     if (!conversation) {
-//       return res.status(404).json({ error: 'Conversation not found' });
-//     }
-
-//     // Fetch messages for the conversation
-//     const messages = await Messages.find({ conversationId: conversation._id });
-
-//     // Return the conversation and messages
-//     return res.status(200).json({ conversation, messages });
-//   } catch (error) {
-//     console.error('Error fetching conversations:', error);
-//     return res.status(500).json({ error: 'Internal Server Error' });
-//   }
-// });
-// // Send message from user to admin (protected route)
-// app.post('/api/user/send-message-to-admin', verifyUserToken, async (req, res) => {
-//   try {
-//     const { adminId, message } = req.body;
-//     const userId = req.user.id;
-
-//     if (!adminId || !message) {
-//       return res.status(400).json({ error: 'Please provide admin ID and message' });
-//     }
-
-//     // Check if the admin exists
-//     const admin = await Users.findOne({ _id: adminId, role: 'admin' });
-//     if (!admin) {
-//       return res.status(404).json({ error: 'Admin not found' });
-//     }
-
-//     // Find or create a conversation between the user and the admin
-//     const conversation = await Conversations.findOne({
-//       participants: { $all: [userId, adminId] },
-//     });
-
-//     let conversationId;
-//     if (conversation) {
-//       conversationId = conversation._id;
-//     } else {
-//       const newConversation = new Conversations({ participants: [userId, adminId] });
-//       const savedConversation = await newConversation.save();
-//       conversationId = savedConversation._id;
-//     }
-
-//     // Save the message
-//     const newMessage = new Messages({ conversationId, sender: userId, message });
-//     await newMessage.save();
-
-//     // Emit the message to the admin (using socket.io)
-//     const adminSocket = users.find((user) => user.userId === adminId);
-//     if (adminSocket) {
-//       io.to(adminSocket.socketId).emit('getMessage', {
-//         senderId: userId,
-//         message,
-//         conversationId,
-//         receiverId: adminId,
-//         user: { id: req.user.id, fullName: req.user.fullName, email: req.user.email },
-//       });
-//     }
-
-//     return res.status(200).json({ message: 'Message sent to admin successfully' });
-//   } catch (error) {
-//     console.error('Error sending message to admin:', error);
-//     return res.status(500).json({ error: 'Internal Server Error' });
-//   }
-// });
 
 
 // Start the server
