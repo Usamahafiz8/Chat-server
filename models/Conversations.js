@@ -8,6 +8,16 @@ const conversationSchema = mongoose.Schema({
   admin: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
+    require:true
+
+  },
+  useremail: {
+    type: String,
+    require:true
+  },
+  UserRole: {
+    type: String,
+    require:true
   },
   messages: [{
     type: mongoose.Schema.Types.ObjectId,

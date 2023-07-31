@@ -161,40 +161,75 @@ app.get("/api/user/admins", async (req, res) => {
   }
 });
 
-/// API to start a conversation with an admin for the user
-app.post("/api/user/start-conversation", verifyUserToken, async (req, res) => {
-  try {
-    const { userId } = req.body;
 
-    // Check if userId is provided in the request body
-    if (!userId) {
-      return res.status(400).json({ error: "userId is required in the request body" });
+// API to start a conversation with an admin for the user
+// app.post("/api/user/start-conversation", async (req, res) => {
+//   try {
+//     const { fullName, email, role } = req.body;
+
+//     // Check if fullName, email, and role are provided in the request body
+//     if (!fullName || !email || !role) {
+//       return res.status(400).json({ error: "Please provide full name, email, and role" });
+//     }
+
+//     // Find the admin to start a conversation with
+//     const admin = await Users.findOne({ role: "admin" });
+
+//     // Check if an admin is available
+//     if (!admin) {
+//       return res.status(404).json({ error: "No admins available to start a conversation" });
+//     }
+
+//     // Create a new conversation with the admin and user
+//     const newConversation = new Conversation({
+//       members: [admin._id, /* Add the ObjectId of the user here */ ],
+//       admin: admin._id,
+//       useremail: email, // Save the user's email in the useremail field
+//     });
+
+//     await newConversation.save();
+//     return res.status(200).json({ conversation: newConversation });
+//   } catch (error) {
+//     console.error("Error starting conversation:", error);
+//     return res.status(500).json({ error: "Internal Server Error" });
+//   }
+// });
+
+// API to start a conversation with an admin for the user
+app.post("/api/user/start-conversation", async (req, res) => {
+  try {
+    const { fullName, email, role } = req.body;
+
+    // Check if fullName, email, and role are provided in the request body
+    if (!fullName || !email || !role) {
+      return res.status(400).json({ error: "Please provide full name, email, and role" });
     }
 
-    // Get all admins with the role "admin" from the Users collection
-    const admins = await Users.find({ role: "admin" });
+    // Find the admin to start a conversation with
+    const admin = await Users.findOne({ role: "admin" });
 
-    // Check if there are any admins available
-    if (admins.length === 0) {
+    // Check if an admin is available
+    if (!admin) {
       return res.status(404).json({ error: "No admins available to start a conversation" });
     }
 
-    // Randomly select an admin from the list of admins
-    const randomIndex = Math.floor(Math.random() * admins.length);
-    const randomAdmin = admins[randomIndex];
-
-    // Check if the conversation between the user and admin already exists
-    const existingConversation = await Conversation.findOne({
-      members: { $all: [randomAdmin._id, userId] },
-    });
+    // Check if a conversation with the user's email already exists
+    const existingConversation = await Conversation.findOne({ useremail: email });
 
     if (existingConversation) {
-      // If the conversation already exists, return the existing conversation
+      // Update the existing conversation with the new full name and role
+      existingConversation.userfullname = fullName;
+      existingConversation.role = role;
+      await existingConversation.save();
       return res.status(200).json({ conversation: existingConversation });
     } else {
-      // If the conversation doesn't exist, create a new conversation
+      // Create a new conversation with the admin and user
       const newConversation = new Conversation({
-        members: [randomAdmin._id, userId],
+        members: [admin._id, /* Add the ObjectId of the user here */ ],
+        admin: admin._id,
+        useremail: email,
+        userfullname: fullName,
+        UserRole: role,
       });
 
       await newConversation.save();
@@ -202,6 +237,72 @@ app.post("/api/user/start-conversation", verifyUserToken, async (req, res) => {
     }
   } catch (error) {
     console.error("Error starting conversation:", error);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+//API to send a message in a conversation
+app.post("/api/user/send-message/:conversationId", async (req, res) => {
+  try {
+    const { conversationId } = req.params; // Extract the conversationId from the URL
+
+    const { senderemail, message } = req.body;
+
+    // Check if senderemail and message are provided in the request body
+    if (!senderemail || !message) {
+      return res.status(400).json({ error: "Please provide senderemail and message" });
+    }
+
+    // Find the conversation with the provided conversationId and senderemail
+    const conversation = await Conversation.findOne({ _id: conversationId, useremail: senderemail });
+
+    // Check if the conversation exists and the senderemail matches
+    if (!conversation) {
+      return res.status(404).json({ error: "Conversation not found or invalid senderemail" });
+    }
+
+    // Create a new message instance with the current time and date
+    const currentTime = new Date();
+    const newMessage = new Message({
+      conversationId: conversationId,
+      senderemail: senderemail, // Use the senderemail as the reference to the User model
+      message: message,
+      time: currentTime.toLocaleTimeString(), // Convert current time to a string
+      date: currentTime.toLocaleDateString(), // Convert current date to a string
+    });
+
+    // Save the new message to the database
+    await newMessage.save();
+
+    // Update the conversation's messages array with the new message's ObjectId
+    conversation.messages.push(newMessage._id);
+    await conversation.save();
+
+    return res.status(200).json({ message: "Message sent successfully" });
+  } catch (error) {
+    console.error("Error sending message:", error);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+
+// API to get all messages in a conversation
+app.get("/api/conversations/messages/:conversationId", async (req, res) => {
+  try {
+    const conversationId = req.params.conversationId;
+
+    // Find the conversation by its ID and populate the 'messages' field with message documents
+    const conversation = await Conversation.findById(conversationId).populate("messages");
+
+    if (!conversation) {
+      return res.status(404).json({ error: "Conversation not found" });
+    }
+
+    // Extract and send the messages
+    const messages = conversation.messages;
+    return res.status(200).json({ messages });
+  } catch (error) {
+    console.error("Error fetching messages:", error);
     return res.status(500).json({ error: "Internal Server Error" });
   }
 });
@@ -471,11 +572,10 @@ app.get("/api/admin/conversation/messages/:conversationId", verifyAdminToken, as
 });
 
 // Send message for both users
-app.post("/api/admin/conversation/send-message/:conversationId", verifyAdminToken, async (req, res) => {
+app.post("/api/admin/conversation/send-message/:conversationId",  async (req, res) => {
   try {
-    const { userId } = req.body;
-    const conversationId = req.params.conversationId;
-    const { message } = req.body;
+    const { conversationId } = req.params;
+    const { userId, message } = req.body;
 
     // Check if the conversation exists
     const conversation = await Conversation.findById(conversationId);
@@ -484,16 +584,15 @@ app.post("/api/admin/conversation/send-message/:conversationId", verifyAdminToke
     }
 
     // Save the message to the database, including sender's ID and fullName
-    const sender = await Users.findById(userId);
-    if (!sender) {
-      return res.status(404).json({ error: "Sender not found" });
+    const admin = await Users.findById(userId);
+    if (!admin) {
+      return res.status(404).json({ error: "Admin not found" });
     }
-console.log(sender.fullName);
-const senderName= sender.fullName
+
     const newMessage = new Message({
       conversationId: conversation._id,
       senderId: userId,
-      senderName:senderName,
+      senderName: admin.fullName, // Use the admin's fullName as the senderName
       message,
       time: new Date().toLocaleTimeString(),
       date: new Date().toLocaleDateString(),
@@ -505,16 +604,15 @@ const senderName= sender.fullName
     // Use Promise.all to perform both operations concurrently
     await Promise.all([newMessage.save(), conversation.save()]);
 
-    // Emit the message to the admin using Socket.IO
-    const adminId = conversation.admin;
-    const adminSocket = io.sockets.sockets.get(adminId);
-    if (adminSocket) {
-      adminSocket.emit("getMessage", {
+    // Emit the message to the user using Socket.IO
+    const userSocket = io.sockets.sockets.get(conversation.user); // 'conversation.user' contains the user's ID
+    if (userSocket) {
+      userSocket.emit("getMessage", {
         senderId: userId,
-        senderName: sender.fullName,
+        senderName: admin.fullName,
         message,
         conversationId: conversation._id,
-        receiverId: adminId,
+        receiverId: conversation.user,
       });
     }
 
@@ -524,7 +622,6 @@ const senderName= sender.fullName
     return res.status(500).json({ error: "Internal Server Error" });
   }
 });
-
 
 
 

@@ -9,12 +9,13 @@ const messageSchema = mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
   },
-  senderName: {
+  senderemail: {
     type: String,
     ref: "User",
   },
   message: {
     type: String,
+    require:true
   },
   time: {
     type: String, // You can store time as a string or use Date type, depending on your preference
