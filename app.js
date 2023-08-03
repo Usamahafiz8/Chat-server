@@ -89,7 +89,125 @@ io.on("connection", (socket) => {
 // });
 
 
- // Listen for sending a message
+socket.on("userSendMessage", async({conversationId, senderemail, message})=>{
+   try {
+
+    let userEmailFromAPI = ""; // To store the user's email retrieved from the API
+    // If senderemail is not provided in the request body, attempt to get it from the URL and auth-token response
+    if (!senderemail) {
+
+      try {
+        const response = await axios.get(url, {
+          headers: {
+            Authorization: `${auth_token}`,
+          },
+        });
+
+        // Check if the response data meets your requirements
+        if (response && response.data.email) {
+          userEmailFromAPI = response.data.email;
+        }
+      } catch (apiError) {
+        // Handle API request error if needed
+      }
+    }
+
+    // Use the retrieved email from the API if available, otherwise use the one provided in the request body
+    const finalSenderEmail = userEmailFromAPI || senderemail;
+
+    // Check if message is provided in the request body
+    if (!message) {
+      return res.status(400).json({ error: "Please provide a message" });
+    }
+
+    // Find the conversation with the provided conversationId and senderemail
+    const conversation = await Conversation.findOne({ _id: conversationId, useremail: finalSenderEmail });
+
+    // Check if the conversation exists and the senderemail matches
+    if (!conversation) {
+      return res.status(404).json({ error: "Conversation not found or invalid senderemail" });
+    }
+
+    // Create a new message instance with the current time and date
+    const currentTime = new Date();
+    const newMessage = new Message({
+      conversationId: conversationId,
+      senderemail: finalSenderEmail, // Use the senderemail as the reference to the User model
+      message: message,
+      time: currentTime.toLocaleTimeString(), // Convert current time to a string
+      date: currentTime.toLocaleDateString(), // Convert current date to a string
+    });
+
+    // Save the new message to the database
+    await newMessage.save();
+
+    // Update the conversation's messages array with the new message's ObjectId
+    conversation.messages.push(newMessage._id);
+    await conversation.save();
+
+    return res.status(200).json({ message: "Message sent successfully" });
+  } catch (error) {
+    console.error("Error sending message:", error);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
+
+})
+
+
+
+
+socket.on("getuserMessages", async ({ conversationId, senderemail, url, auth_token }) => {
+  try {
+    let userEmailFromAPI = "";
+
+    if (url && auth_token) {
+      try {
+        const response = await axios.get(url, {
+          headers: {
+            Authorization: `${auth_token}`,
+          },
+        });
+
+        if (response && response.data.email) {
+          userEmailFromAPI = response.data.email;
+        } else {
+          socket.emit('getuserMessagesResponse', { error: "API data is incomplete or invalid. Please provide senderemail manually." });
+          return;
+        }
+      } catch (apiError) {
+        socket.emit('getuserMessagesResponse', { error: "API request failed. Please provide senderemail manually." });
+        return;
+      }
+    } else if (senderemail) {
+      userEmailFromAPI = senderemail;
+    } else {
+      socket.emit('getuserMessagesResponse', { error: "Please provide senderemail" });
+      return;
+    }
+
+    const conversation = await Conversation.findOne({ _id: conversationId, useremail: userEmailFromAPI }).populate("messages");
+    console.log(conversation);
+    if (!conversation) {
+      socket.emit('getuserMessagesResponse', { error: "Conversation not found or invalid senderemail" });
+      return;
+    }
+
+    if (senderemail && conversation.useremail !== senderemail) {
+      socket.emit('getuserMessagesResponse', { error: "Invalid senderemail for this conversation" });
+      return;
+    }
+
+    const messages = conversation.messages;
+    socket.emit('getuserMessagesResponse', { messages });
+  } catch (error) {
+    console.error("Error fetching messages:", error);
+    socket.emit('getuserMessagesResponse', { error: "Internal Server Error" });
+  }
+});
+
+
+
+// Listen for sending a message
  socket.on("sendMessage", async ({ senderEmail, message, conversationId }) => {
   // Emit the message to the conversation room using the conversationId as the room name
   console.log("semding ",message);
@@ -110,6 +228,9 @@ socket.on("joinConversation", (conversationId) => {
 socket.on("leaveConversation", (conversationId) => {
   socket.leave(conversationId);
 });
+
+
+
 
 
   // Listen for user disconnection and remove them from the users array
