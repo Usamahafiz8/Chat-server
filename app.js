@@ -16,7 +16,7 @@ const Users = require("./models/Users");
 const Conversations = require("./models/Conversations");
 const Conversation = require("./models/Conversations");
 const Message = require("./models/Messages");
-
+const axios = require('axios')
 // app Use
 const app = express();
 app.use(express.json());
@@ -29,7 +29,7 @@ app.use(cors());
 let users = [];
 
 io.on("connection", (socket) => {
-  console.log("User connected", socket.id);
+  // console.log("User connected", socket.id);
 
   // Add the user to the users array when they connect
   socket.on("addUser", (userId) => {
@@ -42,50 +42,73 @@ io.on("connection", (socket) => {
     }
   });
 
-  // Listen for incoming messages
-socket.on("sendMessage", async ({ senderEmail, receiverId, message, conversationId }) => {
-  // Find the receiver's socket using their ID
-  const receiver = users.find((user) => user.userId === receiverId);
-  const sender = users.find((user) => user.userId === senderEmail);
+//   // Listen for incoming messages
+// socket.on("sendMessage", async ({ senderEmail, receiverId, message, conversationId }) => {
+//   // Find the receiver's socket using their ID
+//   const receiver = users.find((user) => user.userId === receiverId);
+//   const sender = users.find((user) => user.userId === senderEmail);
 
-  // Check if the sender and receiver are defined
-  if (!sender || !receiver) {
-    // Handle the case where the sender or receiver is not found
-    // Try to find the conversation based on the provided conversationId and check the members or useremail
-    const conversation = await Conversation.findById(conversationId).populate("members admin");
+//   // Check if the sender and receiver are defined
+//   if (!sender || !receiver) {
+//     // Handle the case where the sender or receiver is not found
+//     // Try to find the conversation based on the provided conversationId and check the members or useremail
+//     const conversation = await Conversation.findById(conversationId).populate("members admin");
     
-    if (!conversation) {
-      return io.to(sender?.socketId).emit("userNotFound", "Invalid conversationId");
-    }
+//     if (!conversation) {
+//       return io.to(sender?.socketId).emit("userNotFound", "Invalid conversationId");
+//     }
 
-    // Check if the user exists in the conversation's members or admin
-    const userExistsInMembers = conversation.members.some(member => member._id.toString() === senderEmail);
-    const userExistsInAdmin = conversation.admin._id.toString() === senderEmail;
+//     // Check if the user exists in the conversation's members or admin
+//     const userExistsInMembers = conversation.members.some(member => member._id.toString() === senderEmail);
+//     const userExistsInAdmin = conversation.admin._id.toString() === senderEmail;
     
-    // Check if the senderEmail matches the conversation's useremail
-    const userEmailMatches = conversation.useremail === senderEmail;
+//     // Check if the senderEmail matches the conversation's useremail
+//     const userEmailMatches = conversation.useremail === senderEmail;
 
-    if (!userExistsInMembers && !userExistsInAdmin && !userEmailMatches) {
-      return io.to(sender?.socketId).emit("userNotFound", "User not found in conversation");
-    }
+//     if (!userExistsInMembers && !userExistsInAdmin && !userEmailMatches) {
+//       return io.to(sender?.socketId).emit("userNotFound", "User not found in conversation");
+//     }
 
-    // Continue with sending the message to the receiver (if found) or the sender (if receiver not found)
-    const receiverSocketId = receiver ? receiver.socketId : sender?.socketId;
-    io.to(receiverSocketId).emit("getMessage", {
-      senderEmail,
-      message,
-      conversationId,
-      receiverId,
-    });
-  } else {
-    // Send the message to both sender and receiver
-    io.to(receiver.socketId).to(sender.socketId).emit("getMessage", {
-      senderEmail,
-      message,
-      conversationId,
-      receiverId,
-    });
-  }
+//     // Continue with sending the message to the receiver (if found) or the sender (if receiver not found)
+//     const receiverSocketId = receiver ? receiver.socketId : sender?.socketId;
+//     io.to(receiverSocketId).emit("getMessage", {
+//       senderEmail,
+//       message,
+//       conversationId,
+//       receiverId,
+//     });
+//   } else {
+//     // Send the message to both sender and receiver
+//     io.to(receiver.socketId).to(sender.socketId).emit("getMessage", {
+//       senderEmail,
+//       message,
+//       conversationId,
+//       receiverId,
+//     });
+//   }
+// });
+
+
+ // Listen for sending a message
+ socket.on("sendMessage", async ({ senderEmail, message, conversationId }) => {
+  // Emit the message to the conversation room using the conversationId as the room name
+  console.log("semding ",message);
+  socket.to(conversationId).emit("getMessage", {
+    senderEmail,
+    message,
+    conversationId,
+  }); 
+  console.log(message,);
+});
+
+// Listen for joining a conversation room
+socket.on("joinConversation", (conversationId) => {
+  socket.join(conversationId);
+});
+
+// Listen for leaving a conversation room
+socket.on("leaveConversation", (conversationId) => {
+  socket.leave(conversationId);
 });
 
 
@@ -261,59 +284,60 @@ app.post("/api/user/start-conversation", async (req, res) => {
     return res.status(500).json({ error: "Internal Server Error" });
   }
 });
+
+function isEmpty(value) {
+  return value == null || value.trim() === '';
+}
+
+
+
 app.post("/api/user/auth/start-conversation", async (req, res) => {
   try {
     const { fullName, email, role, url, auth_token } = req.body;
 
-    // // Check if fullName, email, and role are provided in the request body
-    // if (!fullName || !email || !role) {
-    //   return res.status(400).json({ error: "Please provide full name, email, and role" });
-    // }
+    let useremail, userfullname, UserRole;
 
-    // let useremail = email;
-    // let userfullname = fullName;
-    // let UserRole = role;
-    
-    // Check if url and auth_token are provided
+    console.log('response',url, auth_token, 'main');
     if (!isEmpty(url) && !isEmpty(auth_token)) {
-      // Make a request to the external API with the provided Auth_Token
-      const response = await axios.get(url, {
-        headers: {
-          Authorization: `${auth_token}`,
-        },
-      });
-      console.log(response, url, auth_token);
-      // Extract the required data from the response (Modify this based on the response data from the external API)
-      useremail = response.data.email;
-      userfullname = response.data.name;
-      UserRole = response.data.role;
+      try {
+        // Make a request to the external API with the provided Auth_Token
+        const response = await axios.get(url, {
+          headers: {
+            Authorization: `${auth_token}`,
+          },
+        });
+        // Check if the response data meets your requirements
+        if (response) {
+          // Extract the required data from the response
+          useremail = response.data.email;
+          userfullname = response.data.name;
+          UserRole = response.data.role;
+        } else {
+          // The response data from the API is invalid, prompt the user manually
+          return res.status(400).json({ error: "API data is incomplete or invalid. Please provide name, email, and role manually." });
+        }
+      } catch (apiError) {
+        // The API request encountered an error, prompt the user manually
+        return res.status(400).json({ error: "API request failed. Please provide name, email, and role manually." });
+      }
+    } else if (!isEmpty(fullName) && !isEmpty(email) && !isEmpty(role)) {
+      // Use the manually provided data
+      useremail = email;
+      userfullname = fullName;
+      UserRole = role;
     } else {
       // Prompt the user to provide name, email, and role manually
-      
-      return res.status(200).json({ prompt: true, message: "Please provide name, email, and role manually" });
-      
+      return res.status(400).json({ error: "Please provide name, email, and role manually" });
     }
-    // const { fullName, email, role, url, auth_token } = req.body;
-    // let useremail = email;
-    // let userfullname = fullName;
-    // let UserRole = role;
-    // // Check if fullName, email, and role are provided in the request body
-    // if (!fullName || !email || !role) {
-    //   return res.status(400).json({ error: "Please provide full name, email, and role" });
-    // }
-
-    // let useremail = email;
-    // let userfullname = fullName;
-    // let UserRole = role;
 
     // Find the admin to start a conversation with
     const admin = await Users.findOne({ role: "admin" });
-    
+
     // Check if an admin is available
     if (!admin) {
       return res.status(404).json({ error: "No admins available to start a conversation" });
     }
-    
+
     // Check if a conversation with the user's email already exists
     const existingConversation = await Conversation.findOne({ useremail });
 
@@ -341,6 +365,7 @@ app.post("/api/user/auth/start-conversation", async (req, res) => {
     return res.status(500).json({ error: "Internal Server Error" });
   }
 });
+
 
 //API to send a message in a conversation
 app.post("/api/user/send-message/:conversationId", async (req, res) => {
