@@ -78,83 +78,15 @@ io.on("connection", (socket) => {
 //       receiverId,
 //     });
 //   } else {
-//     // Send the message to both sender and receiver
-//     io.to(receiver.socketId).to(sender.socketId).emit("getMessage", {
-//       senderEmail,
-//       message,
-//       conversationId,
-//       receiverId,
-//     });
-//   }
+  //     // Send the message to both sender and receiver
+  //     io.to(receiver.socketId).to(sender.socketId).emit("getMessage", {
+    //       senderEmail,
+    //       message,
+    //       conversationId,
+    //       receiverId,
+    //     });
+    //   }
 // });
-
-
-socket.on("userSendMessage", async({conversationId, senderemail, message})=>{
-   try {
-
-    let userEmailFromAPI = ""; // To store the user's email retrieved from the API
-    // If senderemail is not provided in the request body, attempt to get it from the URL and auth-token response
-    if (!senderemail) {
-
-      try {
-        const response = await axios.get(url, {
-          headers: {
-            Authorization: `${auth_token}`,
-          },
-        });
-
-        // Check if the response data meets your requirements
-        if (response && response.data.email) {
-          userEmailFromAPI = response.data.email;
-        }
-      } catch (apiError) {
-        // Handle API request error if needed
-      }
-    }
-
-    // Use the retrieved email from the API if available, otherwise use the one provided in the request body
-    const finalSenderEmail = userEmailFromAPI || senderemail;
-
-    // Check if message is provided in the request body
-    if (!message) {
-      return res.status(400).json({ error: "Please provide a message" });
-    }
-
-    // Find the conversation with the provided conversationId and senderemail
-    const conversation = await Conversation.findOne({ _id: conversationId, useremail: finalSenderEmail });
-
-    // Check if the conversation exists and the senderemail matches
-    if (!conversation) {
-      return res.status(404).json({ error: "Conversation not found or invalid senderemail" });
-    }
-
-    // Create a new message instance with the current time and date
-    const currentTime = new Date();
-    const newMessage = new Message({
-      conversationId: conversationId,
-      senderemail: finalSenderEmail, // Use the senderemail as the reference to the User model
-      message: message,
-      time: currentTime.toLocaleTimeString(), // Convert current time to a string
-      date: currentTime.toLocaleDateString(), // Convert current date to a string
-    });
-
-    // Save the new message to the database
-    await newMessage.save();
-
-    // Update the conversation's messages array with the new message's ObjectId
-    conversation.messages.push(newMessage._id);
-    await conversation.save();
-
-    return res.status(200).json({ message: "Message sent successfully" });
-  } catch (error) {
-    console.error("Error sending message:", error);
-    return res.status(500).json({ error: "Internal Server Error" });
-  }
-
-})
-
-
-
 
 socket.on("getuserMessages", async ({ conversationId, senderemail, url, auth_token }) => {
   try {
@@ -186,7 +118,7 @@ socket.on("getuserMessages", async ({ conversationId, senderemail, url, auth_tok
     }
 
     const conversation = await Conversation.findOne({ _id: conversationId, useremail: userEmailFromAPI }).populate("messages");
-    console.log(conversation);
+    // console.log(conversation);
     if (!conversation) {
       socket.emit('getuserMessagesResponse', { error: "Conversation not found or invalid senderemail" });
       return;
@@ -204,6 +136,91 @@ socket.on("getuserMessages", async ({ conversationId, senderemail, url, auth_tok
     socket.emit('getuserMessagesResponse', { error: "Internal Server Error" });
   }
 });
+
+// Assuming you have already set up your socket.io instance
+
+// Listen for incoming messages from the client
+socket.on("userSendMessage", async ({ conversationId, senderemail, message }) => {
+  console.log('sending ', senderemail, message);
+  try {
+    let userEmailFromAPI = ""; // To store the user's email retrieved from the API
+    // If senderemail is not provided in the request body, attempt to get it from the URL and auth-token response
+    if (!senderemail) {
+      try {
+        const response = await axios.get(url, {
+          headers: {
+            Authorization: `${auth_token}`,
+          },
+        });
+        
+        // Check if the response data meets your requirements
+        if (response && response.data.email) {
+          userEmailFromAPI = response.data.email;
+        }
+      } catch (apiError) {
+        // Handle API request error if needed
+      }
+    }
+    
+    // Use the retrieved email from the API if available, otherwise use the one provided in the request body
+    const finalSenderEmail = userEmailFromAPI || senderemail;
+    
+    // Check if message is provided in the request body
+    if (!message) {
+      // Emit an error event to the sender
+      socket.emit("sendMessageError", { error: "Please provide a message" });
+      return;
+    }
+    
+    // Find the conversation with the provided conversationId and senderemail
+    const conversation = await Conversation.findOne({
+      _id: conversationId,
+      useremail: finalSenderEmail,
+    });
+    
+    // Check if the conversation exists and the senderemail matches
+    if (!conversation) {
+      // Emit an error event to the sender
+      socket.emit("sendMessageError", {
+        error: "Conversation not found or invalid senderemail",
+      });
+      return;
+    }
+    
+    // Create a new message instance with the current time and date
+    const currentTime = new Date();
+    const newMessage = new Message({
+      conversationId: conversationId,
+      senderemail: finalSenderEmail, // Use the senderemail as the reference to the User model
+      message: message,
+      time: currentTime.toLocaleTimeString(), // Convert current time to a string
+      date: currentTime.toLocaleDateString(), // Convert current date to a string
+    });
+    
+    console.log('sending ', newMessage);
+    // Save the new message to the database
+    await newMessage.save();
+    
+    // Update the conversation's messages array with the new message's ObjectId
+    conversation.messages.push(newMessage._id);
+    await conversation.save();
+    
+    // Emit the new message to the appropriate socket room
+    socket.to(conversationId).emit("getMessage", {
+      senderEmail: finalSenderEmail,
+      message: message,
+      conversationId: conversationId,
+    });
+  } catch (error) {
+    console.error("Error sending message:", error);
+    // Emit an error event to the sender
+    socket.emit("sendMessageError", { error: "Internal Server Error" });
+  }
+});
+
+
+
+
 
 
 
@@ -628,25 +645,25 @@ app.post("/api/user/send-message/:conversationId", async (req, res) => {
 
 
 // API to get all messages in a conversation
-// app.get("/api/conversations/messages/:conversationId", async (req, res) => {
-//   try {
-//     const conversationId = req.params.conversationId;
+app.get("/api/conversations/messages/:conversationId", async (req, res) => {
+  try {
+    const conversationId = req.params.conversationId;
 
-//     // Find the conversation by its ID and populate the 'messages' field with message documents
-//     const conversation = await Conversation.findById(conversationId).populate("messages");
+    // Find the conversation by its ID and populate the 'messages' field with message documents
+    const conversation = await Conversation.findById(conversationId).populate("messages");
 
-//     if (!conversation) {
-//       return res.status(404).json({ error: "Conversation not found" });
-//     }
+    if (!conversation) {
+      return res.status(404).json({ error: "Conversation not found" });
+    }
 
-//     // Extract and send the messages
-//     const messages = conversation.messages;
-//     return res.status(200).json({ messages });
-//   } catch (error) {
-//     console.error("Error fetching messages:", error);
-//     return res.status(500).json({ error: "Internal Server Error" });
-//   }
-// });
+    // Extract and send the messages
+    const messages = conversation.messages;
+    return res.status(200).json({ messages });
+  } catch (error) {
+    console.error("Error fetching messages:", error);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
+});
 app.get("/api/conversations/messages/:conversationId", async (req, res) => {
   try {
     const { conversationId } = req.params;
@@ -702,39 +719,39 @@ app.get("/api/conversations/messages/:conversationId", async (req, res) => {
 
 
 // API to fetch messages for a conversation
-// app.get("/api/user/conversation/messages/:conversationId", verifyUserToken,  async (req, res) => {
-//   try {
-//     const conversationId = req.params.conversationId;
+app.get("/api/user/conversation/messages/:conversationId", verifyUserToken,  async (req, res) => {
+  try {
+    const conversationId = req.params.conversationId;
 
-//     // Check if the conversation exists
-//     const conversation = await Conversation.findById(conversationId);
-//     if (!conversation) {
-//       return res.status(404).json({ error: "Conversation not found" });
-//     }
+    // Check if the conversation exists
+    const conversation = await Conversation.findById(conversationId);
+    if (!conversation) {
+      return res.status(404).json({ error: "Conversation not found" });
+    }
 
-//     // Find all messages for the given conversationId
-//     const messages = await Message.find({ conversationId });
+    // Find all messages for the given conversationId
+    const messages = await Message.find({ conversationId });
 
-//     // Emit the messages to the users involved in the conversation using Socket.IO
-//     const senderId = conversation.members[0];
-//     const receiverId = conversation.members[1];
-//     const senderSocket = io.sockets.sockets.get(senderId);
-//     const receiverSocket = io.sockets.sockets.get(receiverId);
+    // Emit the messages to the users involved in the conversation using Socket.IO
+    const senderId = conversation.members[0];
+    const receiverId = conversation.members[1];
+    const senderSocket = io.sockets.sockets.get(senderId);
+    const receiverSocket = io.sockets.sockets.get(receiverId);
 
-//     if (senderSocket) {
-//       senderSocket.emit("getMessages", { conversationId, messages });
-//     }
+    if (senderSocket) {
+      senderSocket.emit("getMessages", { conversationId, messages });
+    }
 
-//     if (receiverSocket) {
-//       receiverSocket.emit("getMessages", { conversationId, messages });
-//     }
+    if (receiverSocket) {
+      receiverSocket.emit("getMessages", { conversationId, messages });
+    }
 
-//     return res.status(200).json({ messages });
-//   } catch (error) {
-//     console.error("Error fetching messages:", error);
-//     return res.status(500).json({ error: "Internal Server Error" });
-//   }
-// });
+    return res.status(200).json({ messages });
+  } catch (error) {
+    console.error("Error fetching messages:", error);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
+});
 
 // Send message for both users
 app.post("/api/user/conversation/send-message/:conversationId",  async (req, res) => {
